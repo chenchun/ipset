@@ -11,29 +11,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// struct nfgenmsg {
-// 	uint8_t nfgen_family;
-// 	uint8_t version;
-// 	uint16_t res_id;
-// };
-type nfgenmsg struct {
-	family  uint8
-	version uint8
-	resid   uint16
-}
-
-func deserializeGenlMsg(b []byte) (m *nfgenmsg) {
-	return (*nfgenmsg)(unsafe.Pointer(&b[0:unsafe.Sizeof(*m)][0]))
-}
-
-func (m *nfgenmsg) Serialize() []byte {
-	return (*(*[unsafe.Sizeof(*m)]byte)(unsafe.Pointer(m)))[:]
-}
-
-func (m *nfgenmsg) Len() int {
-	return int(unsafe.Sizeof(*m))
-}
-
 // Handle provides a namespace specific ipvs handle to program ipvs
 // rules.
 type Handle struct {
@@ -62,7 +39,7 @@ func New(path string) (*Handle, error) {
 	return &Handle{}, nil
 }
 
-func (h *Handle) CreateSet(set *IPSet, ignoreExistErr bool) error {
+func (h *Handle) Create(set *IPSet, opts ...Opt) error {
 	if set.Name == "" {
 		return fmt.Errorf("Invalid create command: missing setname")
 	}
@@ -73,16 +50,33 @@ func (h *Handle) CreateSet(set *IPSet, ignoreExistErr bool) error {
 	if err != nil {
 		return err
 	}
-	req.AddData(nl.NewRtAttr(IPSET_ATTR_PROTOCOL, nl.Uint8Attr(uint8(IPSET_PROTOCOL_MIN))))
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(set.Name)))
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_TYPENAME, nl.ZeroTerminated(string(set.SetType))))
-	req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(uint8(0)))) //TODO revision
+	fillRevision(req, set.SetType, set.SetRevison)
 	fillFamily(req, set.Family)
 	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
+	return err
+}
+
+func (h *Handle) Destroy(setName string, opts ...Opt) error {
+	if setName == "" {
+		return fmt.Errorf("Invalid destroy command: missing setname")
+	}
+	req, err := newRequest(IPSET_CMD_DESTROY)
 	if err != nil {
 		return err
 	}
-	return nil
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(setName)))
+	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
+	return err
+}
+
+func fillRevision(req *nl.NetlinkRequest, setType SetType, revision *uint8) {
+	if revision != nil {
+		req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(uint8(*revision))))
+	} else {
+		req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(setRevisionMap[setType])))
+	}
 }
 
 func fillFamily(req *nl.NetlinkRequest, hashFamily string) {
@@ -101,7 +95,6 @@ func (h *Handle) Protocol() error {
 	if err != nil {
 		return err
 	}
-	req.AddData(nl.NewRtAttr(IPSET_ATTR_PROTOCOL, nl.Uint8Attr(uint8(IPSET_PROTOCOL))))
 	msgs, err := req.Execute(unix.NETLINK_NETFILTER, 0)
 	if err != nil {
 		log.Fatalf("msg %v, err %v", msgs, err)
@@ -131,6 +124,7 @@ func newRequest(cmd int) (*nl.NetlinkRequest, error) {
 	}
 	req := nl.NewNetlinkRequest(cmd|(NFNL_SUBSYS_IPSET<<8), IPSetCmdflags[cmd-1])
 	req.AddData(&nfgenmsg{family: unix.AF_INET, version: NFNETLINK_V0, resid: 0})
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_PROTOCOL, nl.Uint8Attr(uint8(IPSET_PROTOCOL_MIN))))
 	return req, nil
 }
 

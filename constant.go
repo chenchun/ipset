@@ -2,6 +2,7 @@ package ipset
 
 import (
 	"syscall"
+	"unsafe"
 )
 
 const (
@@ -427,7 +428,7 @@ type IPSet struct {
 	// Name is the set name.
 	Name string
 	// SetType specifies the ipset type.
-	SetType Type
+	SetType SetType
 	// Family is valid for the create command of all hash type sets except for hash:mac.
 	// It defines the protocol family of the IP addresses to be stored in the set.
 	// The default is inet, i.e IPv4. For the inet family one can add or delete multiple entries by specifying a range
@@ -439,7 +440,12 @@ type IPSet struct {
 	MaxElem int
 	// PortRange specifies the port range of bitmap:port type ipset.
 	PortRange string
-	// TODO: add comment message for ipset
+	// Comment specifies the comment for this ipset
+	Comment string
+	// SetRevison is the revision of SetType. Check revisions supported to a SetType by modinfo $SetModuleName,
+	// e.g. modinfo ip_set_hash_ip ip_set_hash_ipmark
+	// If unset, assigns a static revison defined in constant.go
+	SetRevison *uint8
 }
 
 // Entry represents a ipset entry.
@@ -458,33 +464,74 @@ type Entry struct {
 	// IP2 is the entry's second IP.  IP2 may not be empty for `hash:ip,port,ip` type ip set.
 	IP2 string
 	// SetType is the type of ipset where the entry exists.
-	SetType Type
+	SetType SetType
 	//  [ timeout value ] [ packets value ] [ bytes value ] [ comment string ] [ skbmark value ] [ skbprio value ] [ skbqueue value ]
 	Options []string
 }
 
-// Type represents the ipset type
-type Type string
+// SetType represents the ipset type
+type SetType string
 
 const (
-	HashIP Type = "hash:ip"
-	// HashIPPort represents the `hash:ip,port` type ipset.  The hash:ip,port is similar to hash:ip but
-	// you can store IP address and protocol-port pairs in it.  TCP, SCTP, UDP, UDPLITE, ICMP and ICMPv6 are supported
-	// with port numbers/ICMP(v6) types and other protocol numbers without port information.
-	HashIPPort Type = "hash:ip,port"
-	// HashIPPortIP represents the `hash:ip,port,ip` type ipset.  The hash:ip,port,ip set type uses a hash to store
-	// IP address, port number and a second IP address triples.  The port number is interpreted together with a
-	// protocol (default TCP) and zero protocol number cannot be used.
-	HashIPPortIP Type = "hash:ip,port,ip"
-	// HashIPPortNet represents the `hash:ip,port,net` type ipset.  The hash:ip,port,net set type uses a hash to store IP address, port number and IP network address triples.  The port
-	// number is interpreted together with a protocol (default TCP) and zero protocol number cannot be used.   Network address
-	// with zero prefix size cannot be stored either.
-	HashIPPortNet Type = "hash:ip,port,net"
-	// BitmapPort represents the `bitmap:port` type ipset.  The bitmap:port set type uses a memory range, where each bit
-	// represents one TCP/UDP port.  A bitmap:port type of set can store up to 65535 ports.
-	BitmapPort Type = "bitmap:port"
-
-	HashNet Type = "hash:net"
-
-	HashNetPort Type = "hash:net,port"
+	BitmapIP       SetType = "bitmap:ip"
+	BitmapIPMac    SetType = "bitmap:ip,mac"
+	BitmapPort     SetType = "bitmap:port"
+	HashIP         SetType = "hash:ip"
+	HashMac        SetType = "hash:mac"
+	HashIPMac      SetType = "hash:ip,mac"
+	HashNet        SetType = "hash:net"
+	HashNetNet     SetType = "hash:net,net"
+	HashIPPort     SetType = "hash:ip,port"
+	HashNetPort    SetType = "hash:net,port"
+	HashIPPortIP   SetType = "hash:ip,port,ip"
+	HashIPPortNet  SetType = "hash:ip,port,net"
+	HashIPMark     SetType = "hash:ip,mark"
+	HashNetPortNet SetType = "hash:net,port,net"
+	HashNetIface   SetType = "hash:net,iface"
+	ListSet        SetType = "list:set"
 )
+
+// check ipset/lib/ipset_hash_ip.c ...
+var (
+	setRevisionMap = map[SetType]uint8{
+		BitmapIP:       3,
+		BitmapIPMac:    3,
+		BitmapPort:     3,
+		HashIP:         4,
+		HashMac:        0,
+		HashIPMac:      0,
+		HashNet:        6,
+		HashNetNet:     2,
+		HashIPPort:     5,
+		HashNetPort:    7,
+		HashIPPortIP:   5,
+		HashIPPortNet:  7,
+		HashIPMark:     2,
+		HashNetPortNet: 2,
+		HashNetIface:   6,
+		ListSet:        3,
+	}
+)
+
+// struct nfgenmsg {
+// 	uint8_t nfgen_family;
+// 	uint8_t version;
+// 	uint16_t res_id;
+// };
+type nfgenmsg struct {
+	family  uint8
+	version uint8
+	resid   uint16
+}
+
+func deserializeGenlMsg(b []byte) (m *nfgenmsg) {
+	return (*nfgenmsg)(unsafe.Pointer(&b[0:unsafe.Sizeof(*m)][0]))
+}
+
+func (m *nfgenmsg) Serialize() []byte {
+	return (*(*[unsafe.Sizeof(*m)]byte)(unsafe.Pointer(m)))[:]
+}
+
+func (m *nfgenmsg) Len() int {
+	return int(unsafe.Sizeof(*m))
+}
