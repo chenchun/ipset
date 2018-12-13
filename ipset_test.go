@@ -3,6 +3,8 @@ package ipset
 import (
 	"errors"
 	"testing"
+	"fmt"
+	"strings"
 )
 
 func TestProtocol(t *testing.T) {
@@ -10,7 +12,9 @@ func TestProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Protocol(); err != nil {
+	if proto, err := h.Protocol(); err != nil {
+		t.Fatal(err)
+	} else if proto < IPSET_PROTOCOL_MIN || proto > IPSET_PROTOCOL {
 		t.Fatal(err)
 	}
 }
@@ -77,5 +81,23 @@ func TestTryConvertErrno(t *testing.T) {
 	}
 	if err := TryConvertErrno(errors.New("errno -1")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestList(t *testing.T) {
+	h, err := New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Create(&IPSet{Name: "TestList", SetType: HashIP}); err != nil {
+		t.Error(err)
+	}
+	if sets, err := h.List(""); err != nil {
+		t.Error(err)
+	} else if !strings.Contains(fmt.Sprintf("%+v", sets), `{Name:TestList SetType:hash:ip Family:inet HashSize:0 MaxElem:0 PortRange: Comment: SetRevison:`) {
+		t.Errorf(fmt.Sprintf("%+v", sets))
+	}
+	if err := h.Destroy("TestList"); err != nil {
+		t.Errorf("destroy failed: %v", err)
 	}
 }

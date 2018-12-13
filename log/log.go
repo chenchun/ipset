@@ -4,6 +4,10 @@ import (
 	l "log"
 )
 
+func Debugf(format string, args ...interface{}) {
+	l.Printf(format+"\n", args...)
+}
+
 func InfofN(format string, args ...interface{}) {
 	l.Printf(format, args...)
 }

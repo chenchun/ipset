@@ -3,7 +3,6 @@ package ipset
 import (
 	"fmt"
 	"strconv"
-	"unsafe"
 
 	"github.com/chenchun/ipset/log"
 	"github.com/vishvananda/netlink/nl"
@@ -14,7 +13,6 @@ import (
 // Handle provides a namespace specific ipvs handle to program ipvs
 // rules.
 type Handle struct {
-	sock *nl.NetlinkSocket
 }
 
 // New provides a new ipset handle in the namespace pointed to by the
@@ -90,32 +88,109 @@ func fillFamily(req *nl.NetlinkRequest, hashFamily string) {
 	}
 }
 
-func (h *Handle) Protocol() error {
+func (h *Handle) Protocol() (uint8, error) {
 	req, err := newRequest(IPSET_CMD_PROTOCOL)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	msgs, err := req.Execute(unix.NETLINK_NETFILTER, 0)
 	if err != nil {
-		log.Fatalf("msg %v, err %v", msgs, err)
-		return err
+		return 0, err
 	}
-	log.Infof("protocol successed!")
-	min := 0
-	max := 0
+	var min, max uint8
 	for i := range msgs {
-		nlAttr := DeserializeNlAttr(msgs[i])
-		if nlAttr.Type == IPSET_ATTR_PROTOCOL {
-			max = int(nlAttr.Len)
-			if min != 0 {
-				min = max
-			}
-		} else if nlAttr.Type == IPSET_ATTR_PROTOCOL_MIN {
-			min = int(nlAttr.Len)
+		if len(msgs[i]) < SizeofNFGenMsg {
+			return 0, fmt.Errorf("possible corrupt msg %v", msgs[i])
 		}
+		//nlGenlMsg := DeserializeNFGenlMsg(msgs[i])
+		attrs, err := ParseRouteAttr(msgs[i][SizeofNFGenMsg:])
+		if err != nil {
+			return 0, fmt.Errorf("possible corrupt msg %v", msgs[i])
+		}
+		for i := range attrs {
+			switch attrs[i].Attr.Type {
+			case IPSET_ATTR_PROTOCOL:
+				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
+					return 0, fmt.Errorf("possible corrupt msg %v", msgs[i])
+				}
+				max = uint8(attrs[i].Value[0])
+				if min == 0 {
+					min = max
+				}
+			case IPSET_ATTR_PROTOCOL_MIN:
+				min = uint8(attrs[i].Value[0])
+			}
+		}
+		break
 	}
-	log.Infof("supported protocol %d, min supported %d", max, min)
-	return nil
+	log.Debugf("supported protocol %d, min supported %d", max, min)
+	return max, nil
+}
+
+func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
+	req, err := newRequest(IPSET_CMD_LIST)
+	if err != nil {
+		return nil, err
+	}
+	if setName != "" {
+		req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(setName)))
+	}
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_FLAGS, nl.Uint32Attr(IPSET_FLAG_LIST_SETNAME | IPSET_FLAG_LIST_HEADER)))
+	msgs, err := req.Execute(unix.NETLINK_NETFILTER, 0)
+	if err != nil {
+		return nil, err
+	}
+	var sets []IPSet
+	for i := range msgs {
+		ipset := &IPSet{}
+		if len(msgs[i]) < SizeofNFGenMsg {
+			return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+		}
+		//nlGenlMsg := DeserializeNFGenlMsg(msgs[i])
+		attrs, err := ParseRouteAttr(msgs[i][SizeofNFGenMsg:])
+		if err != nil {
+			return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+		}
+		for i := range attrs {
+			switch attrs[i].Attr.Type {
+			case IPSET_ATTR_PROTOCOL:
+				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+				}
+				//protocol := uint8(attrs[i].Value[0])
+			case IPSET_ATTR_SETNAME:
+				// 0 terminated
+				ipset.Name = string(attrs[i].Value[:len(attrs[i].Value)-1])
+			case IPSET_ATTR_TYPENAME:
+				ipset.SetType = SetType(attrs[i].Value[:len(attrs[i].Value)-1])
+			case IPSET_ATTR_REVISION:
+				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+				}
+				ipset.SetRevison = &attrs[i].Value[0]
+			case IPSET_ATTR_FAMILY:
+				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+				}
+				switch attrs[i].Value[0] {
+				case NFPROTO_IPV4:
+					ipset.Family = "inet"
+				case NFPROTO_IPV6:
+					ipset.Family = "inet6"
+				}
+			case IPSET_ATTR_DATA:
+				//nest attrs
+				nestAttrs, err := ParseRouteAttr(attrs[i].Value)
+				if err != nil {
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+				}
+				_ = nestAttrs
+				// TODO deserialize entries
+			}
+		}
+		sets = append(sets, *ipset)
+	}
+	return sets, nil
 }
 
 func newRequest(cmd int) (*nl.NetlinkRequest, error) {
@@ -130,13 +205,8 @@ func newRequest(cmd int) (*nl.NetlinkRequest, error) {
 
 func print(msg [][]byte) {
 	for i := range msg {
-		log.InfofN("%s ", string(msg[i]))
+		log.Infof("i=%d %v", i, string(msg[i]))
 	}
-	log.Infof("")
-}
-
-func DeserializeNlAttr(b []byte) *unix.NlAttr {
-	return (*unix.NlAttr)(unsafe.Pointer(&b[0:unix.SizeofNlAttr][0]))
 }
 
 // TryConvertErrno tries to convert input err to a IPSETErrno
