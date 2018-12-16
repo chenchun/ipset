@@ -2,9 +2,9 @@ package ipset
 
 import (
 	"errors"
-	"testing"
 	"fmt"
 	"strings"
+	"testing"
 )
 
 func TestProtocol(t *testing.T) {
@@ -98,6 +98,26 @@ func TestList(t *testing.T) {
 		t.Errorf(fmt.Sprintf("%+v", sets))
 	}
 	if err := h.Destroy("TestList"); err != nil {
+		t.Errorf("destroy failed: %v", err)
+	}
+}
+
+func TestAddDel(t *testing.T) {
+	h, err := New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := &IPSet{Name: "TestAdd", SetType: HashIP}
+	if err := h.Create(set); err != nil {
+		t.Error(err)
+	}
+	if err := h.Add(set, &Entry{IP: "192.168.0.1"}); err != nil {
+		t.Error(err)
+	}
+	if err := h.Del(set, &Entry{IP: "192.168.0.1"}); err != nil {
+		t.Error(err)
+	}
+	if err := h.Destroy(set.Name); err != nil {
 		t.Errorf("destroy failed: %v", err)
 	}
 }

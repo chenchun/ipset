@@ -1,11 +1,11 @@
 package ipset
 
 import (
-	"unsafe"
+	"encoding/binary"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
-	"encoding/binary"
 )
 
 const (
@@ -44,4 +44,3 @@ func netlinkRouteAttrAndValue(b []byte) (*unix.RtAttr, []byte, int, error) {
 func rtaAlignOf(attrlen int) int {
 	return (attrlen + unix.RTA_ALIGNTO - 1) & ^(unix.RTA_ALIGNTO - 1)
 }
-

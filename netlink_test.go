@@ -1,8 +1,8 @@
 package ipset
 
 import (
-	"testing"
 	"encoding/binary"
+	"testing"
 
 	"github.com/vishvananda/netlink/nl"
 )

@@ -1,8 +1,8 @@
 package ipset
 
 import (
-	"testing"
 	"net"
+	"testing"
 )
 
 func TestIP4ToInt(t *testing.T) {

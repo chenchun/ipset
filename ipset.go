@@ -2,6 +2,7 @@ package ipset
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 
 	"github.com/chenchun/ipset/log"
@@ -58,7 +59,7 @@ func (h *Handle) Create(set *IPSet, opts ...Opt) error {
 
 func (h *Handle) Destroy(setName string, opts ...Opt) error {
 	if setName == "" {
-		return fmt.Errorf("Invalid destroy command: missing setname")
+		return fmt.Errorf("invalid destroy command: missing setname")
 	}
 	req, err := newRequest(IPSET_CMD_DESTROY)
 	if err != nil {
@@ -135,7 +136,7 @@ func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
 	if setName != "" {
 		req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(setName)))
 	}
-	req.AddData(nl.NewRtAttr(IPSET_ATTR_FLAGS, nl.Uint32Attr(IPSET_FLAG_LIST_SETNAME | IPSET_FLAG_LIST_HEADER)))
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_FLAGS, nl.Uint32Attr(IPSET_FLAG_LIST_SETNAME|IPSET_FLAG_LIST_HEADER)))
 	msgs, err := req.Execute(unix.NETLINK_NETFILTER, 0)
 	if err != nil {
 		return nil, err
@@ -193,6 +194,49 @@ func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
 	return sets, nil
 }
 
+func (h *Handle) Add(set *IPSet, entry *Entry, opts ...Opt) error {
+	return h.addOrDel(IPSET_CMD_ADD, set, entry, opts...)
+}
+
+func (h *Handle) Del(set *IPSet, entry *Entry, opts ...Opt) error {
+	return h.addOrDel(IPSET_CMD_DEL, set, entry, opts...)
+}
+
+func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) error {
+	if set.Name == "" {
+		return fmt.Errorf("invalid add command: missing setname")
+	}
+	req, err := newRequest(IPSET_CMD_LIST)
+	if err != nil {
+		return err
+	}
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(set.Name)))
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_FLAGS, nl.Uint32Attr(IPSET_FLAG_LIST_SETNAME|IPSET_FLAG_LIST_HEADER)))
+	dataAttr := nl.NewRtAttr(IPSET_ATTR_DATA, nil)
+	//for i := IPSET_ATTR_UNSPEC + 1; i <= IPSET_ATTR_ADT_MAX; i++ {
+	//
+	//}
+	if set.SetType == HashIP {
+		// TODO netmask
+		if err := fillIP(dataAttr, entry.IP); err != nil {
+			return err
+		}
+	}
+	req.AddData(dataAttr)
+	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
+	return err
+}
+
+func fillIP(parent *nl.RtAttr, ipStr string) error {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return fmt.Errorf("invalid add command: bad ip: %s", ipStr)
+	}
+	// TODO ip6
+	parent.AddRtAttr(IPSET_ATTR_IP, nl.Uint32Attr(ip4ToInt(ip)))
+	return nil
+}
+
 func newRequest(cmd int) (*nl.NetlinkRequest, error) {
 	if cmd <= IPSET_CMD_NONE || cmd >= IPSET_MSG_MAX {
 		return nil, fmt.Errorf("cmd should between IPSET_CMD_NONE and IPSET_MSG_MAX")
@@ -211,7 +255,7 @@ func print(msg [][]byte) {
 
 // TryConvertErrno tries to convert input err to a IPSETErrno
 // Return the IPSetErrno pointer if it succeeds, otherwise nil
-func TryConvertErrno(err error) *IPSetErrno {
+func TryConvertErrno(err error) *int32 {
 	if len(err.Error()) < len("errno ") {
 		return nil
 	}
@@ -219,7 +263,7 @@ func TryConvertErrno(err error) *IPSetErrno {
 	if err != nil {
 		return nil
 	}
-	ipsetNo := IPSetErrno(no)
+	ipsetNo := int32(no)
 	if ipsetNo >= IPSET_ERR_PRIVATE && ipsetNo <= IPSET_ERR_SKBINFO {
 		return &ipsetNo
 	}
