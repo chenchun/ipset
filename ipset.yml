@@ -1,0 +1,21 @@
+---
+GENERATOR:
+  PackageName: ipset
+
+PARSER:
+  IncludePaths: [/usr/include]
+  SourcesPaths: [ipset.h]
+
+TRANSLATOR:
+  ConstRules:
+    defines: expand
+    enum: expand
+  Rules:
+    const:
+#      - {transform: lower}
+      - {action: accept, from: "(?i)ipset_"}
+#      - {action: replace, from: "(?i)ipset_", to: _}
+#      - {transform: export}
+    post-global:
+#      - {action: replace, from: "cmd_", to: command_}
+#      - {load: snakecase}
