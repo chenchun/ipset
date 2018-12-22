@@ -104,7 +104,7 @@ func (h *Handle) Protocol() (uint8, error) {
 			return 0, fmt.Errorf("possible corrupt msg %v", msgs[i])
 		}
 		//nlGenlMsg := DeserializeNFGenlMsg(msgs[i])
-		attrs, err := ParseRouteAttr(msgs[i][SizeofNFGenMsg:])
+		attrs, err := nl.ParseRouteAttr(msgs[i][SizeofNFGenMsg:])
 		if err != nil {
 			return 0, fmt.Errorf("possible corrupt msg %v", msgs[i])
 		}
@@ -148,7 +148,7 @@ func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
 			return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
 		}
 		//nlGenlMsg := DeserializeNFGenlMsg(msgs[i])
-		attrs, err := ParseRouteAttr(msgs[i][SizeofNFGenMsg:])
+		attrs, err := nl.ParseRouteAttr(msgs[i][SizeofNFGenMsg:])
 		if err != nil {
 			return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
 		}
@@ -179,9 +179,9 @@ func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
 				case NFPROTO_IPV6:
 					ipset.Family = "inet6"
 				}
-			case IPSET_ATTR_DATA:
+			case IPSET_ATTR_DATA | unix.NLA_F_NESTED:
 				//nest attrs
-				nestAttrs, err := ParseRouteAttr(attrs[i].Value)
+				nestAttrs, err := nl.ParseRouteAttr(attrs[i].Value)
 				if err != nil {
 					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
 				}
@@ -206,13 +206,12 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 	if set.Name == "" {
 		return fmt.Errorf("invalid add command: missing setname")
 	}
-	req, err := newRequest(IPSET_CMD_LIST)
+	req, err := newRequest(command)
 	if err != nil {
 		return err
 	}
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(set.Name)))
-	req.AddData(nl.NewRtAttr(IPSET_ATTR_FLAGS, nl.Uint32Attr(IPSET_FLAG_LIST_SETNAME|IPSET_FLAG_LIST_HEADER)))
-	dataAttr := nl.NewRtAttr(IPSET_ATTR_DATA, nil)
+	dataAttr := nl.NewRtAttr(IPSET_ATTR_DATA|unix.NLA_F_NESTED, nil)
 	//for i := IPSET_ATTR_UNSPEC + 1; i <= IPSET_ATTR_ADT_MAX; i++ {
 	//
 	//}
@@ -221,8 +220,11 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 		if err := fillIP(dataAttr, entry.IP); err != nil {
 			return err
 		}
+		dataAttr.AddRtAttr(IPSET_ATTR_LINENO|unix.NLA_F_NET_BYTEORDER, nl.Uint32Attr(0))
 	}
 	req.AddData(dataAttr)
+	data := req.Serialize()
+	log.Debugf("%v", data)
 	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
 	return err
 }
@@ -232,8 +234,13 @@ func fillIP(parent *nl.RtAttr, ipStr string) error {
 	if ip == nil {
 		return fmt.Errorf("invalid add command: bad ip: %s", ipStr)
 	}
-	// TODO ip6
-	parent.AddRtAttr(IPSET_ATTR_IP, nl.Uint32Attr(ip4ToInt(ip)))
+	ipAttr := nl.NewRtAttr(IPSET_ATTR_IP|unix.NLA_F_NESTED, nil)
+	if ip4 := ip.To4(); ip4 != nil {
+		ipAttr.AddRtAttr(IPSET_ATTR_IPADDR_IPV4|unix.NLA_F_NET_BYTEORDER, nl.Uint32Attr(ip4ToInt(ip)))
+	} else if ip6 := ip.To16(); ip6 != nil {
+		// TODO ip6
+	}
+	parent.AddChild(ipAttr)
 	return nil
 }
 

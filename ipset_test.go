@@ -111,6 +111,9 @@ func TestAddDel(t *testing.T) {
 	if err := h.Create(set); err != nil {
 		t.Error(err)
 	}
+	// expect send bytes
+	// len      type flags seq          pid               Protocol         SET_NAME  TestAdd                      DATA         IP         IPADDR_IPV4            LINENO
+	// 64 0 0 0  9 6  5 2  1   0  0  0  0 0 0 0  2 0 0 0  5 0 1 0 6 0 0 0  12 0 2 0  84 101 115 116 65 100 100 0  24 0 7 128  12 0 1 128  8 0 1 64 192 168 0 1   8 0 9 64  0 0 0 0
 	if err := h.Add(set, &Entry{IP: "192.168.0.1"}); err != nil {
 		t.Error(err)
 	}
