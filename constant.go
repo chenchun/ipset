@@ -286,14 +286,14 @@ type IPSet struct {
 
 // Entry represents a ipset entry.
 type Entry struct {
-	// IP is the entry's IP.  The IP address protocol corresponds to the HashFamily of IPSet.
-	// All entries' IP addresses in the same ip set has same the protocol, IPv4 or IPv6.
+	// IP is the entry's IP address, IPv4 or IPv6.
 	IP string
-	// Port is the entry's Port.
-	Port int
-	// Protocol is the entry's Protocol.  The protocols of entries in the same ip set are all
-	// the same.  The accepted protocols are TCP and UDP.
-	Protocol string
+	// ip[/cidr]
+	CIDR *uint8
+	// Port is the entry's Port, with PortTo to form a port range. If PortTo is not 0, then Port represents PortFrom.
+	Port, PortTo uint16
+	// Proto is the entry's Protocol. see unix.IPPROTO_*.
+	Proto uint8
 	// Net is the entry's IP network address.  Network address with zero prefix size can NOT
 	// be stored.
 	Net string

@@ -212,15 +212,8 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 	}
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(set.Name)))
 	dataAttr := nl.NewRtAttr(IPSET_ATTR_DATA|unix.NLA_F_NESTED, nil)
-	//for i := IPSET_ATTR_UNSPEC + 1; i <= IPSET_ATTR_ADT_MAX; i++ {
-	//
-	//}
-	if set.SetType == HashIP {
-		// TODO netmask
-		if err := fillIP(dataAttr, entry.IP); err != nil {
-			return err
-		}
-		dataAttr.AddRtAttr(IPSET_ATTR_LINENO|unix.NLA_F_NET_BYTEORDER, nl.Uint32Attr(0))
+	if err := fillEntries(dataAttr, set, entry); err != nil {
+		return err
 	}
 	req.AddData(dataAttr)
 	data := req.Serialize()
@@ -229,18 +222,57 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 	return err
 }
 
-func fillIP(parent *nl.RtAttr, ipStr string) error {
+func fillEntries(parent *nl.RtAttr, set *IPSet, entry *Entry) error {
+	switch set.SetType {
+	case HashIP:
+		fallthrough
+	case HashNet:
+		if err := fillIP(parent, entry.IP, entry.CIDR); err != nil {
+			return err
+		}
+	case HashIPPort:
+		fallthrough
+	case HashNetPort:
+		if err := fillIP(parent, entry.IP, entry.CIDR); err != nil {
+			return err
+		}
+		fillPort(parent, entry.Port, entry.PortTo, entry.Proto)
+	}
+	fillLineno(parent)
+	return nil
+}
+
+func fillLineno(parent *nl.RtAttr) {
+	parent.AddRtAttr(IPSET_ATTR_LINENO|unix.NLA_F_NET_BYTEORDER, nl.Uint32Attr(0))
+}
+
+func fillPort(parent *nl.RtAttr, port, portTo uint16, proto uint8) {
+	parent.AddRtAttr(IPSET_ATTR_PORT|unix.NLA_F_NET_BYTEORDER, htons(port))
+	if portTo != 0 {
+		parent.AddRtAttr(IPSET_ATTR_PORT_TO|unix.NLA_F_NET_BYTEORDER, htons(portTo))
+	}
+	if proto == 0 {
+		parent.AddRtAttr(IPSET_ATTR_PROTO, nl.Uint8Attr(unix.IPPROTO_TCP))
+	} else {
+		parent.AddRtAttr(IPSET_ATTR_PROTO, nl.Uint8Attr(proto))
+	}
+}
+
+func fillIP(parent *nl.RtAttr, ipStr string, cidr *uint8) error {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return fmt.Errorf("invalid add command: bad ip: %s", ipStr)
 	}
 	ipAttr := nl.NewRtAttr(IPSET_ATTR_IP|unix.NLA_F_NESTED, nil)
 	if ip4 := ip.To4(); ip4 != nil {
-		ipAttr.AddRtAttr(IPSET_ATTR_IPADDR_IPV4|unix.NLA_F_NET_BYTEORDER, nl.Uint32Attr(ip4ToInt(ip)))
+		ipAttr.AddRtAttr(IPSET_ATTR_IPADDR_IPV4|unix.NLA_F_NET_BYTEORDER, []byte(ip4))
 	} else if ip6 := ip.To16(); ip6 != nil {
 		// TODO ip6
 	}
 	parent.AddChild(ipAttr)
+	if cidr != nil {
+		parent.AddRtAttr(IPSET_ATTR_CIDR, nl.Uint8Attr(*cidr))
+	}
 	return nil
 }
 
