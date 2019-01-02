@@ -7,34 +7,14 @@ import (
 
 	"github.com/chenchun/ipset/log"
 	"github.com/vishvananda/netlink/nl"
-	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
 
-// Handle provides a namespace specific ipvs handle to program ipvs
-// rules.
+// Handle provides a specific ipset handle to program ipset rules.
 type Handle struct {
 }
 
-// New provides a new ipset handle in the namespace pointed to by the
-// passed path. It will return a valid handle or an error in case an
-// error occurred while creating the handle.
-func New(path string) (*Handle, error) {
-	n := netns.None()
-	if path != "" {
-		var err error
-		n, err = netns.GetFromPath(path)
-		if err != nil {
-			return nil, err
-		}
-	}
-	defer n.Close()
-
-	//sock, err := nl.GetNetlinkSocketAt(n, netns.None(), syscall.NETLINK_GENERIC)
-	//if err != nil {
-	//	return nil, err
-	//}
-
+func New() (*Handle, error) {
 	return &Handle{}, nil
 }
 
@@ -284,12 +264,6 @@ func newRequest(cmd int) (*nl.NetlinkRequest, error) {
 	req.AddData(&nfgenmsg{family: unix.AF_INET, version: NFNETLINK_V0, resid: 0})
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_PROTOCOL, nl.Uint8Attr(uint8(IPSET_PROTOCOL_MIN))))
 	return req, nil
-}
-
-func print(msg [][]byte) {
-	for i := range msg {
-		log.Infof("i=%d %v", i, string(msg[i]))
-	}
 }
 
 // TryConvertErrno tries to convert input err to a IPSETErrno

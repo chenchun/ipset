@@ -11,7 +11,7 @@ import (
 )
 
 func TestProtocol(t *testing.T) {
-	h, err := New("")
+	h, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func allSetType() []SetType {
 }
 
 func TestCreateDestroy(t *testing.T) {
-	h, err := New("")
+	h, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestTryConvertErrno(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	h, err := New("")
+	h, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestList(t *testing.T) {
 }
 
 func TestAddDelHashIP(t *testing.T) {
-	h, err := New("")
+	h, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ type addDelCase struct {
 }
 
 func TestAddDel(t *testing.T) {
-	h, err := New("")
+	h, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
