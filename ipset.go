@@ -25,6 +25,12 @@ func (h *Handle) Create(set *IPSet, opts ...Opt) error {
 	if string(set.SetType) == "" {
 		return fmt.Errorf("Invalid create command: missing settype")
 	}
+	if set.Family == "" {
+		// family must be set as empty for HashMac
+		if set.SetType != HashMac {
+			set.Family = "inet"
+		}
+	}
 	req, err := newRequest(IPSET_CMD_CREATE)
 	if err != nil {
 		return err
@@ -33,6 +39,7 @@ func (h *Handle) Create(set *IPSet, opts ...Opt) error {
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_TYPENAME, nl.ZeroTerminated(string(set.SetType))))
 	fillRevision(req, set.SetType, set.SetRevison)
 	fillFamily(req, set.Family)
+	log.Debugf("create %v", req.Serialize())
 	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
 	return err
 }
@@ -63,9 +70,9 @@ func fillFamily(req *nl.NetlinkRequest, hashFamily string) {
 	case "inet6":
 		req.AddData(nl.NewRtAttr(IPSET_ATTR_FAMILY, nl.Uint8Attr(uint8(NFPROTO_IPV6))))
 	case "inet":
-		fallthrough
-	default:
 		req.AddData(nl.NewRtAttr(IPSET_ATTR_FAMILY, nl.Uint8Attr(uint8(NFPROTO_IPV4))))
+	default:
+		req.AddData(nl.NewRtAttr(IPSET_ATTR_FAMILY, nl.Uint8Attr(uint8(NFPROTO_UNSPEC))))
 	}
 }
 
@@ -196,8 +203,7 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 		return err
 	}
 	req.AddData(dataAttr)
-	data := req.Serialize()
-	log.Debugf("%v", data)
+	log.Debugf("addOrDel %v", req.Serialize())
 	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
 	return err
 }
@@ -206,6 +212,8 @@ type fillAddAttr func(parent *nl.RtAttr, entry *Entry) error
 
 var setTypeFillFuncMap = map[SetType][]fillAddAttr{
 	HashIP:         {fillIP},
+	HashMac:        {fillMac},
+	HashIPMac:      {fillIP, fillMac},
 	HashNet:        {fillIP},
 	HashNetNet:     {fillIP, fillIP2},
 	HashIPPort:     {fillIP, fillPort},
@@ -279,6 +287,14 @@ func fillIP2(parent *nl.RtAttr, entry *Entry) error {
 	if entry.CIDR2 != nil {
 		parent.AddRtAttr(IPSET_ATTR_CIDR2, nl.Uint8Attr(*entry.CIDR2))
 	}
+	return nil
+}
+
+func fillMac(parent *nl.RtAttr, entry *Entry) error {
+	if len(entry.Mac) == 0 {
+		return fmt.Errorf("invalid add command: bad mac: %v", entry.Mac)
+	}
+	parent.AddRtAttr(IPSET_ATTR_ETHER, []byte(entry.Mac))
 	return nil
 }
 

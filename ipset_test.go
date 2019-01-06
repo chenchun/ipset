@@ -3,6 +3,7 @@ package ipset
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
 	"sort"
 	"strings"
@@ -179,12 +180,26 @@ func TestAddDel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mac, err := net.ParseMAC("01:23:45:67:89:ab")
+	if err != nil {
+		t.Fatal(err)
+	}
 	cidr24 := uint8(24)
 	for _, test := range []addDelCase{
 		{
 			set:         &IPSet{Name: "TestAddDelHashIP", SetType: HashIP},
 			entry:       &Entry{IP: "192.168.0.1"},
 			expectFirst: "192.168.0.1",
+		},
+		{
+			set:         &IPSet{Name: "TestAddDelHashMac", SetType: HashMac},
+			entry:       &Entry{Mac: mac},
+			expectFirst: "01:23:45:67:89:AB",
+		},
+		{
+			set:         &IPSet{Name: "TestAddDelHashIPMac", SetType: HashIPMac},
+			entry:       &Entry{IP: "192.168.0.1", Mac: mac},
+			expectFirst: "192.168.0.1,01:23:45:67:89:AB",
 		},
 		{
 			set:         &IPSet{Name: "TestAddDelHashNet", SetType: HashNet},
@@ -233,7 +248,14 @@ func TestAddDel(t *testing.T) {
 		},
 	} {
 		if err := h.Create(test.set); err != nil {
-			t.Errorf("case %s create: %v", test.set.Name, err)
+			errno := *TryConvertErrno(err)
+			if errno != IPSET_ERR_PROTOCOL && errno != IPSET_ERR_FIND_TYPE {
+				t.Errorf("create setType %s failed: %v", string(test.set.SetType), err)
+			} else {
+				// skip some settypes which may not be supported
+				t.Logf("skip creating setType %s: %v", string(test.set.SetType), err)
+				continue
+			}
 		}
 		if err := h.Add(test.set, test.entry); err != nil {
 			t.Errorf("case %s add: %v", test.set.Name, err)
@@ -250,7 +272,7 @@ func TestAddDel(t *testing.T) {
 			}
 		} else {
 			if err := checkFirstMember(test.set.Name, test.expectFirst); err != nil {
-				t.Errorf("case %s checkFirstMember: %v", test.set.Name, err)
+				t.Fatalf("case %s checkFirstMember: %v", test.set.Name, err)
 			}
 		}
 		if err := h.Del(test.set, test.entry); err != nil {

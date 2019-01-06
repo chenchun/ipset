@@ -1,6 +1,7 @@
 package ipset
 
 import (
+	"net"
 	"syscall"
 	"unsafe"
 )
@@ -301,6 +302,8 @@ type Entry struct {
 	IP2 string
 	// ip2[/cidr2]
 	CIDR2 *uint8
+	// mac address
+	Mac net.HardwareAddr
 	// SetType is the type of ipset where the entry exists.
 	SetType SetType
 	//  [ timeout value ] [ packets value ] [ bytes value ] [ comment string ] [ skbmark value ] [ skbprio value ] [ skbqueue value ]
