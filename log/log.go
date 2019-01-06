@@ -2,10 +2,16 @@ package log
 
 import (
 	l "log"
+	"os"
 )
 
+// TODO replace this package
+
+// Debugf logs if env DEBUG exist
 func Debugf(format string, args ...interface{}) {
-	l.Printf(format+"\n", args...)
+	if _, exist := os.LookupEnv("DEBUG"); exist {
+		l.Printf(format+"\n", args...)
+	}
 }
 
 func InfofN(format string, args ...interface{}) {
