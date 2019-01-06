@@ -202,21 +202,28 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 	return err
 }
 
+type fillAddAttr func(parent *nl.RtAttr, entry *Entry) error
+
+var setTypeFillFuncMap = map[SetType][]fillAddAttr{
+	HashIP:         {fillIP},
+	HashNet:        {fillIP},
+	HashNetNet:     {fillIP, fillIP2},
+	HashIPPort:     {fillIP, fillPort},
+	HashNetPort:    {fillIP, fillPort},
+	HashIPPortIP:   {fillIP, fillPort, fillIP2},
+	HashIPPortNet:  {fillIP, fillPort, fillIP2},
+	HashNetPortNet: {fillIP, fillPort, fillIP2},
+}
+
 func fillEntries(parent *nl.RtAttr, set *IPSet, entry *Entry) error {
-	switch set.SetType {
-	case HashIP:
-		fallthrough
-	case HashNet:
-		if err := fillIP(parent, entry.IP, entry.CIDR); err != nil {
-			return err
+	if funcs, exist := setTypeFillFuncMap[set.SetType]; !exist {
+		return fmt.Errorf("adding entries for setType %s not supported now", set.SetType)
+	} else {
+		for i := range funcs {
+			if err := funcs[i](parent, entry); err != nil {
+				return err
+			}
 		}
-	case HashIPPort:
-		fallthrough
-	case HashNetPort:
-		if err := fillIP(parent, entry.IP, entry.CIDR); err != nil {
-			return err
-		}
-		fillPort(parent, entry.Port, entry.PortTo, entry.Proto)
 	}
 	fillLineno(parent)
 	return nil
@@ -226,22 +233,10 @@ func fillLineno(parent *nl.RtAttr) {
 	parent.AddRtAttr(IPSET_ATTR_LINENO|unix.NLA_F_NET_BYTEORDER, nl.Uint32Attr(0))
 }
 
-func fillPort(parent *nl.RtAttr, port, portTo uint16, proto uint8) {
-	parent.AddRtAttr(IPSET_ATTR_PORT|unix.NLA_F_NET_BYTEORDER, htons(port))
-	if portTo != 0 {
-		parent.AddRtAttr(IPSET_ATTR_PORT_TO|unix.NLA_F_NET_BYTEORDER, htons(portTo))
-	}
-	if proto == 0 {
-		parent.AddRtAttr(IPSET_ATTR_PROTO, nl.Uint8Attr(unix.IPPROTO_TCP))
-	} else {
-		parent.AddRtAttr(IPSET_ATTR_PROTO, nl.Uint8Attr(proto))
-	}
-}
-
-func fillIP(parent *nl.RtAttr, ipStr string, cidr *uint8) error {
-	ip := net.ParseIP(ipStr)
+func fillIP(parent *nl.RtAttr, entry *Entry) error {
+	ip := net.ParseIP(entry.IP)
 	if ip == nil {
-		return fmt.Errorf("invalid add command: bad ip: %s", ipStr)
+		return fmt.Errorf("invalid add command: bad ip: %s", entry.IP)
 	}
 	ipAttr := nl.NewRtAttr(IPSET_ATTR_IP|unix.NLA_F_NESTED, nil)
 	if ip4 := ip.To4(); ip4 != nil {
@@ -250,8 +245,39 @@ func fillIP(parent *nl.RtAttr, ipStr string, cidr *uint8) error {
 		// TODO ip6
 	}
 	parent.AddChild(ipAttr)
-	if cidr != nil {
-		parent.AddRtAttr(IPSET_ATTR_CIDR, nl.Uint8Attr(*cidr))
+	if entry.CIDR != nil {
+		parent.AddRtAttr(IPSET_ATTR_CIDR, nl.Uint8Attr(*entry.CIDR))
+	}
+	return nil
+}
+
+func fillPort(parent *nl.RtAttr, entry *Entry) error {
+	parent.AddRtAttr(IPSET_ATTR_PORT|unix.NLA_F_NET_BYTEORDER, htons(entry.Port))
+	if entry.PortTo != 0 {
+		parent.AddRtAttr(IPSET_ATTR_PORT_TO|unix.NLA_F_NET_BYTEORDER, htons(entry.PortTo))
+	}
+	if entry.Proto == 0 {
+		parent.AddRtAttr(IPSET_ATTR_PROTO, nl.Uint8Attr(unix.IPPROTO_TCP))
+	} else {
+		parent.AddRtAttr(IPSET_ATTR_PROTO, nl.Uint8Attr(entry.Proto))
+	}
+	return nil
+}
+
+func fillIP2(parent *nl.RtAttr, entry *Entry) error {
+	ip := net.ParseIP(entry.IP2)
+	if ip == nil {
+		return fmt.Errorf("invalid add command: bad ip: %s", entry.IP2)
+	}
+	ipAttr := nl.NewRtAttr(IPSET_ATTR_IP2|unix.NLA_F_NESTED, nil)
+	if ip4 := ip.To4(); ip4 != nil {
+		ipAttr.AddRtAttr(IPSET_ATTR_IPADDR_IPV4|unix.NLA_F_NET_BYTEORDER, []byte(ip4))
+	} else if ip6 := ip.To16(); ip6 != nil {
+		// TODO ip6
+	}
+	parent.AddChild(ipAttr)
+	if entry.CIDR2 != nil {
+		parent.AddRtAttr(IPSET_ATTR_CIDR2, nl.Uint8Attr(*entry.CIDR2))
 	}
 	return nil
 }

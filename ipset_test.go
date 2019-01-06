@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"testing"
 
@@ -191,12 +192,17 @@ func TestAddDel(t *testing.T) {
 			expectFirst: "192.168.0.0/24",
 		},
 		{
+			set:         &IPSet{Name: "TestAddDelHashNetNet", SetType: HashNetNet},
+			entry:       &Entry{IP: "192.168.0.1", CIDR: &cidr24, IP2: "192.168.0.2", CIDR2: &cidr24},
+			expectFirst: "192.168.0.0/24,192.168.0.0/24",
+		},
+		{
 			set:         &IPSet{Name: "TestAddDelHashIPPort", SetType: HashIPPort},
 			entry:       &Entry{IP: "192.168.0.1", Port: 34},
 			expectFirst: "192.168.0.1,tcp:34",
 		},
 		{
-			set:           &IPSet{Name: "TestAddDelHashIPPortRange", SetType: HashIPPort},
+			set:           &IPSet{Name: "TestAddDelHashIPPort-Range", SetType: HashIPPort},
 			entry:         &Entry{IP: "192.168.0.1", Port: 34, PortTo: 35, Proto: unix.IPPROTO_UDP},
 			expectEntries: []string{"192.168.0.1,udp:35", "192.168.0.1,udp:34"},
 		},
@@ -206,9 +212,24 @@ func TestAddDel(t *testing.T) {
 			expectFirst: "192.168.0.0/24,tcp:34",
 		},
 		{
-			set:           &IPSet{Name: "TestAddDelHashNetPortRange", SetType: HashNetPort},
-			entry:         &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, PortTo: 35, Proto: unix.IPPROTO_UDP},
-			expectEntries: []string{"192.168.0.0/24,udp:35", "192.168.0.0/24,udp:34"},
+			set:           &IPSet{Name: "TestAddDelHashNetPort", SetType: HashNetPort},
+			entry:         &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP},
+			expectEntries: []string{"192.168.0.0/24,udp:34"},
+		},
+		{
+			set:           &IPSet{Name: "TestAddDelHashIPPortIP", SetType: HashIPPortIP},
+			entry:         &Entry{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.0.2"},
+			expectEntries: []string{"192.168.0.1,udp:34,192.168.0.2"},
+		},
+		{
+			set:           &IPSet{Name: "TestAddDelHashIPPortNet", SetType: HashIPPortNet},
+			entry:         &Entry{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.2", CIDR2: &cidr24},
+			expectEntries: []string{"192.168.0.1,udp:34,192.168.1.0/24"},
+		},
+		{
+			set:           &IPSet{Name: "TestAddDelHashNetPortNet", SetType: HashNetPortNet},
+			entry:         &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.2", CIDR2: &cidr24},
+			expectEntries: []string{"192.168.0.0/24,udp:34,192.168.1.0/24"},
 		},
 	} {
 		if err := h.Create(test.set); err != nil {
@@ -221,6 +242,8 @@ func TestAddDel(t *testing.T) {
 			if entries, err := listMembers(test.set.Name); err != nil {
 				t.Errorf("case %s check: %v", test.set.Name, err)
 			} else {
+				sort.Strings(entries)
+				sort.Strings(test.expectEntries)
 				if fmt.Sprintf("%v", entries) != fmt.Sprintf("%v", test.expectEntries) {
 					t.Errorf("case %s checkEntries: expect %q, real %q", test.set.Name, test.expectEntries, entries)
 				}

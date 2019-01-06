@@ -299,6 +299,8 @@ type Entry struct {
 	Net string
 	// IP2 is the entry's second IP.  IP2 may not be empty for `hash:ip,port,ip` type ip set.
 	IP2 string
+	// ip2[/cidr2]
+	CIDR2 *uint8
 	// SetType is the type of ipset where the entry exists.
 	SetType SetType
 	//  [ timeout value ] [ packets value ] [ bytes value ] [ comment string ] [ skbmark value ] [ skbprio value ] [ skbqueue value ]
