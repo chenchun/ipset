@@ -115,7 +115,24 @@ func (h *Handle) Protocol() (uint8, error) {
 	return max, nil
 }
 
-func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
+func (h *Handle) List(setName string, opts ...Opt) ([]ListItem, error) {
+	//req:	msg:	IPSET_CMD_LIST|SAVE
+	//attr:	IPSET_ATTR_PROTOCOL
+	//	IPSET_ATTR_SETNAME	(optional)
+	//
+	//resp:	attr:	IPSET_ATTR_SETNAME
+	//		IPSET_ATTR_TYPENAME
+	//		IPSET_ATTR_REVISION
+	//		IPSET_ATTR_FAMILY
+	//		IPSET_ATTR_DATA
+	//			create-specific-data
+	//		IPSET_ATTR_ADT
+	//			IPSET_ATTR_DATA
+	//				adt-specific-data
+	//		IPSET_ATTR_ADT
+	//			IPSET_ATTR_DATA
+	//				adt-specific-data
+	//		...
 	req, err := newRequest(IPSET_CMD_LIST)
 	if err != nil {
 		return nil, err
@@ -128,37 +145,37 @@ func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	var sets []IPSet
-	for i := range msgs {
-		ipset := &IPSet{}
-		if len(msgs[i]) < SizeofNFGenMsg {
-			return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+	var sets []ListItem
+	for k := range msgs {
+		log.Debugf("receive msgs[%d]=%v", k, msgs[k])
+		var ipset ListItem
+		if len(msgs[k]) < SizeofNFGenMsg {
+			return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
 		}
-		//nlGenlMsg := DeserializeNFGenlMsg(msgs[i])
-		attrs, err := nl.ParseRouteAttr(msgs[i][SizeofNFGenMsg:])
+		//nlGenlMsg := DeserializeNFGenlMsg(msgs[k])
+		attrs, err := nl.ParseRouteAttr(msgs[k][SizeofNFGenMsg:])
 		if err != nil {
-			return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+			return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
 		}
 		for i := range attrs {
 			switch attrs[i].Attr.Type {
 			case IPSET_ATTR_PROTOCOL:
 				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
-					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
 				}
 				//protocol := uint8(attrs[i].Value[0])
 			case IPSET_ATTR_SETNAME:
-				// 0 terminated
 				ipset.Name = string(attrs[i].Value[:len(attrs[i].Value)-1])
 			case IPSET_ATTR_TYPENAME:
 				ipset.SetType = SetType(attrs[i].Value[:len(attrs[i].Value)-1])
 			case IPSET_ATTR_REVISION:
 				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
-					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
 				}
 				ipset.SetRevison = &attrs[i].Value[0]
 			case IPSET_ATTR_FAMILY:
 				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
-					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
 				}
 				switch attrs[i].Value[0] {
 				case NFPROTO_IPV4:
@@ -170,15 +187,82 @@ func (h *Handle) List(setName string, opts ...Opt) ([]IPSet, error) {
 				//nest attrs
 				nestAttrs, err := nl.ParseRouteAttr(attrs[i].Value)
 				if err != nil {
-					return nil, fmt.Errorf("possible corrupt msg %v", msgs[i])
+					return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
 				}
-				_ = nestAttrs
-				// TODO deserialize entries
+				for j := range nestAttrs {
+					switch nestAttrs[j].Attr.Type {
+					default:
+						// TODO Parse create attr
+						//HASHSIZE: 1024
+						//MAXELEM: 65536
+						//REFERENCES: 0
+						//MEMSIZE: 176
+						//log.Infof("unknown attr %v", nestAttrs[j].Attr.Type)
+					}
+				}
+			case IPSET_ATTR_ADT | unix.NLA_F_NESTED:
+				entries, err := parseAdtAttr(attrs[i].Value)
+				if err != nil {
+					return nil, err
+				}
+				ipset.Entries = append(ipset.Entries, entries...)
 			}
 		}
-		sets = append(sets, *ipset)
+		sets = append(sets, ipset)
 	}
 	return sets, nil
+}
+
+func parseAdtAttr(data []byte) ([]Entry, error) {
+	nestAttrs, err := nl.ParseRouteAttr(data)
+	if err != nil {
+		return nil, err
+	}
+	var entries []Entry
+	for j := range nestAttrs {
+		switch nestAttrs[j].Attr.Type {
+		case IPSET_ATTR_DATA | unix.NLA_F_NESTED:
+			var entry Entry
+			nestGrandAttrs, err := nl.ParseRouteAttr(nestAttrs[j].Value)
+			if err != nil {
+				return nil, err
+			}
+			for k := range nestGrandAttrs {
+				switch nestGrandAttrs[k].Attr.Type {
+				case IPSET_ATTR_IP | unix.NLA_F_NESTED:
+					ip, err := parseIP(nestGrandAttrs[k].Value)
+					if err != nil {
+						return nil, err
+					}
+					entry.IP = ip.String()
+				default:
+					//TODO parse more attrs
+					log.Infof("unknown attr %v", nestGrandAttrs[k].Attr.Type)
+				}
+			}
+			entries = append(entries, entry)
+		default:
+			return nil, fmt.Errorf("unknown attr %v, expect only IPSET_ATTR_DATA attr", nestAttrs[j].Attr.Type)
+		}
+	}
+	return entries, nil
+}
+
+func parseIP(ipData []byte) (net.IP, error) {
+	nestAttrs, err := nl.ParseRouteAttr(ipData)
+	if err != nil {
+		return nil, fmt.Errorf("possible corrupt ip msg %v", ipData)
+	}
+	for i := range nestAttrs {
+		switch nestAttrs[i].Attr.Type {
+		case IPSET_ATTR_IPADDR_IPV4:
+			if nestAttrs[i].Attr.Len != unix.SizeofRtAttr+4 {
+				return nil, fmt.Errorf("possible corrupt ip msg %v", ipData)
+			}
+			return net.IP(nestAttrs[i].Value), nil
+		}
+	}
+	return nil, fmt.Errorf("possible corrupt ip msg %v, nestAttrs %v", ipData, nestAttrs)
 }
 
 func (h *Handle) Add(set *IPSet, entry *Entry, opts ...Opt) error {

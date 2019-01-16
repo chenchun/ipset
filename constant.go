@@ -380,3 +380,8 @@ func (m *nfgenmsg) Serialize() []byte {
 func (m *nfgenmsg) Len() int {
 	return SizeofNFGenMsg
 }
+
+type ListItem struct {
+	IPSet
+	Entries []Entry
+}

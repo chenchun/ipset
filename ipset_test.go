@@ -94,15 +94,63 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Create(&IPSet{Name: "TestList", SetType: HashIP}); err != nil {
-		t.Error(err)
+	testSet := &IPSet{Name: "TestList", SetType: HashIP}
+	if err := h.Create(testSet); err != nil {
+		t.Fatal(err)
 	}
-	if sets, err := h.List(""); err != nil {
-		t.Error(err)
-	} else if !strings.Contains(fmt.Sprintf("%+v", sets), `{Name:TestList SetType:hash:ip Family:inet HashSize:0 MaxElem:0 PortRange: Comment: SetRevison:`) {
+	testEntry1 := Entry{IP: "192.168.0.1"}
+	if err := h.Add(testSet, &testEntry1); err != nil {
+		t.Fatalf("case %s add: %v", testSet.Name, err)
+	}
+	sets, err := h.List("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fmt.Sprintf("%+v", sets), `{Name:TestList SetType:hash:ip Family:inet HashSize:0 MaxElem:0 PortRange: Comment: SetRevison:`) {
 		t.Errorf(fmt.Sprintf("%+v", sets))
 	}
-	if err := h.Destroy("TestList"); err != nil {
+	if len(sets) <= 0 {
+		t.Fatal()
+	}
+	for i := range sets {
+		if sets[i].Name == testSet.Name {
+			if len(sets[i].Entries) != 1 {
+				t.Fatalf("expect 1 entry, real entries: %v", sets[i].Entries)
+			}
+			expectEntry := fmt.Sprintf("%v", testEntry1)
+			if fmt.Sprintf("%v", sets[i].Entries[0]) != expectEntry {
+				t.Errorf("expect entry %v, real entry: %v", expectEntry, sets[i].Entries[0])
+			}
+		}
+	}
+	testEntry2 := Entry{IP: "192.168.0.2"}
+	if err := h.Add(testSet, &testEntry2); err != nil {
+		t.Errorf("case %s add: %v", testSet.Name, err)
+	}
+	sets, err = h.List("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sets) <= 0 {
+		t.Fatal()
+	}
+	for i := range sets {
+		if sets[i].Name == testSet.Name {
+			if len(sets[i].Entries) != 2 {
+				t.Errorf("expect 2 entry, real entries: %v", sets[i].Entries)
+				continue
+			}
+			expectEntry := fmt.Sprintf("%v", testEntry1)
+			if fmt.Sprintf("%v", sets[i].Entries[0]) != expectEntry {
+				t.Errorf("expect entry %v, real entry: %v", expectEntry, sets[i].Entries[0])
+			}
+			expectEntry = fmt.Sprintf("%v", testEntry2)
+			if fmt.Sprintf("%v", sets[i].Entries[1]) != expectEntry {
+				t.Errorf("expect entry %v, real entry: %v", expectEntry, sets[i].Entries[1])
+			}
+		}
+	}
+	if err := h.Destroy(testSet.Name); err != nil {
 		t.Errorf("destroy failed: %v", err)
 	}
 }
