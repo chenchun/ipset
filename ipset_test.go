@@ -140,13 +140,14 @@ func TestList(t *testing.T) {
 				t.Errorf("expect 2 entry, real entries: %v", sets[i].Entries)
 				continue
 			}
-			expectEntry := fmt.Sprintf("%v", testEntry1)
-			if fmt.Sprintf("%v", sets[i].Entries[0]) != expectEntry {
-				t.Errorf("expect entry %v, real entry: %v", expectEntry, sets[i].Entries[0])
+			var entryStrs []string
+			for j := range sets[i].Entries {
+				entryStrs = append(entryStrs, fmt.Sprintf("%+v", sets[i].Entries[j]))
 			}
-			expectEntry = fmt.Sprintf("%v", testEntry2)
-			if fmt.Sprintf("%v", sets[i].Entries[1]) != expectEntry {
-				t.Errorf("expect entry %v, real entry: %v", expectEntry, sets[i].Entries[1])
+			sort.Strings(entryStrs)
+			expect := fmt.Sprintf("%+v", []Entry{testEntry1, testEntry2})
+			if fmt.Sprintf("%v", entryStrs) != expect {
+				t.Errorf("expect entry %v, real entry: %v", expect, entryStrs)
 			}
 		}
 	}
