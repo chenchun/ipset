@@ -184,7 +184,6 @@ func (h *Handle) List(setName string, opts ...Opt) ([]ListItem, error) {
 					ipset.Family = "inet6"
 				}
 			case IPSET_ATTR_DATA | unix.NLA_F_NESTED:
-				//nest attrs
 				nestAttrs, err := nl.ParseRouteAttr(attrs[i].Value)
 				if err != nil {
 					return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
@@ -230,11 +229,45 @@ func parseAdtAttr(data []byte) ([]Entry, error) {
 			for k := range nestGrandAttrs {
 				switch nestGrandAttrs[k].Attr.Type {
 				case IPSET_ATTR_IP | unix.NLA_F_NESTED:
+					fallthrough
+				case IPSET_ATTR_IP2 | unix.NLA_F_NESTED:
 					ip, err := parseIP(nestGrandAttrs[k].Value)
 					if err != nil {
 						return nil, err
 					}
-					entry.IP = ip.String()
+					if nestGrandAttrs[k].Attr.Type == IPSET_ATTR_IP2|unix.NLA_F_NESTED {
+						entry.IP2 = ip.String()
+					} else {
+						entry.IP = ip.String()
+					}
+				case IPSET_ATTR_CIDR:
+					fallthrough
+				case IPSET_ATTR_CIDR2:
+					if nestGrandAttrs[k].Attr.Len != unix.SizeofRtAttr+1 {
+						return nil, fmt.Errorf("possible corrupt cidr msg %v", nestGrandAttrs)
+					}
+					cidr := uint8(nestGrandAttrs[k].Value[0])
+					if nestGrandAttrs[k].Attr.Type == IPSET_ATTR_CIDR2 {
+						entry.CIDR2 = &cidr
+					} else {
+						entry.CIDR = &cidr
+					}
+				case IPSET_ATTR_ETHER:
+					if nestGrandAttrs[k].Attr.Len != unix.SizeofRtAttr+6 {
+						return nil, fmt.Errorf("possible corrupt mac msg %v", nestGrandAttrs)
+					}
+					entry.Mac = net.HardwareAddr(nestGrandAttrs[k].Value)
+				case IPSET_ATTR_PORT | unix.NLA_F_NET_BYTEORDER:
+					if nestGrandAttrs[k].Attr.Len != unix.SizeofRtAttr+2 {
+						return nil, fmt.Errorf("possible corrupt port msg %v", nestGrandAttrs)
+					}
+					port := ntohs(nestGrandAttrs[k].Value)
+					entry.Port = uint16(port)
+				case IPSET_ATTR_PROTO:
+					if nestGrandAttrs[k].Attr.Len != unix.SizeofRtAttr+1 {
+						return nil, fmt.Errorf("possible corrupt port msg %v", nestGrandAttrs)
+					}
+					entry.Proto = uint8(nestGrandAttrs[k].Value[0])
 				default:
 					//TODO parse more attrs
 					log.Infof("unknown attr %v", nestGrandAttrs[k].Attr.Type)
@@ -260,6 +293,7 @@ func parseIP(ipData []byte) (net.IP, error) {
 				return nil, fmt.Errorf("possible corrupt ip msg %v", ipData)
 			}
 			return net.IP(nestAttrs[i].Value), nil
+			//TODO ipv6
 		}
 	}
 	return nil, fmt.Errorf("possible corrupt ip msg %v, nestAttrs %v", ipData, nestAttrs)

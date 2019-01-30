@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"encoding/json"
 	"golang.org/x/sys/unix"
 )
 
@@ -65,12 +66,16 @@ func TestCreateDestroy(t *testing.T) {
 	for _, setType := range allSetType() {
 		name := "TestCreate" + string(setType)
 		if err := h.Create(&IPSet{Name: name, SetType: setType}); err != nil {
-			errno := *TryConvertErrno(err)
-			if errno != IPSET_ERR_PROTOCOL && errno != IPSET_ERR_FIND_TYPE {
-				t.Errorf("create setType %s failed: %v", string(setType), err)
+			errno := TryConvertErrno(err)
+			if errno == nil {
+				t.Error(err)
 			} else {
-				// skip some settypes which may not be supported
-				t.Logf("skip creating setType %s: %v", string(setType), err)
+				if *errno != IPSET_ERR_PROTOCOL && *errno != IPSET_ERR_FIND_TYPE {
+					t.Errorf("create setType %s failed: %v", string(setType), err)
+				} else {
+					// skip some settypes which may not be supported
+					t.Logf("skip creating setType %s: %v", string(setType), err)
+				}
 			}
 		} else {
 			if err := h.Destroy(name); err != nil {
@@ -217,14 +222,78 @@ func checkFirstMember(set, expectFirst string) error {
 	}
 }
 
-type addDelCase struct {
-	set           *IPSet
-	entry         *Entry
-	expectFirst   string
-	expectEntries []string
+func checkListEntries(h *Handle, test addDelCase) error {
+	iterms, err := h.List(test.set.Name)
+	if err != nil {
+		return err
+	}
+	if len(iterms) != 1 {
+		return fmt.Errorf("zero iterms", test.set.Name)
+	} else {
+		if len(iterms[0].Entries) != len(test.expectEntries) {
+			return fmt.Errorf("expect %s, real %+v", test.expectEntries, iterms[0].Entries)
+		}
+		sort.Sort(by(test.expectEntries))
+		expectJson, err := json.Marshal(test.expectEntries)
+		if err != nil {
+			return err
+		}
+		sort.Sort(by(iterms[0].Entries))
+		realJson, err := json.Marshal(iterms[0].Entries)
+		if err != nil {
+			return err
+		}
+		if string(expectJson) != string(realJson) {
+			return fmt.Errorf("expect %s, real %s", expectJson, realJson)
+		}
+	}
+	return nil
 }
 
-func TestAddDel(t *testing.T) {
+type by []Entry
+
+func (b by) Len() int {
+	return len(b)
+}
+
+func (b by) Swap(i, j int) {
+	b[i], b[j] = b[j], b[i]
+}
+
+func (b by) Less(i, j int) bool {
+	if b[i].IP != b[j].IP {
+		return b[i].IP < b[j].IP
+	}
+	if b[i].CIDR != nil && b[j].CIDR != nil {
+		if *b[i].CIDR != *b[j].CIDR {
+			return *b[i].CIDR < *b[j].CIDR
+		}
+	}
+	if b[i].Port != b[j].Port {
+		return b[i].Port < b[j].Port
+	}
+	if b[i].Proto != b[j].Proto {
+		return b[i].Proto < b[j].Proto
+	}
+	if b[i].IP2 != b[j].IP2 {
+		return b[i].IP2 < b[j].IP2
+	}
+	if b[i].CIDR2 != nil && b[j].CIDR2 != nil {
+		if *b[i].CIDR2 != *b[j].CIDR2 {
+			return *b[i].CIDR2 < *b[j].CIDR2
+		}
+	}
+	return true
+}
+
+type addDelCase struct {
+	set            *IPSet
+	entry          *Entry
+	expectEntryStr []string
+	expectEntries  []Entry
+}
+
+func TestAddDelList(t *testing.T) {
 	h, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -236,93 +305,106 @@ func TestAddDel(t *testing.T) {
 	cidr24 := uint8(24)
 	for _, test := range []addDelCase{
 		{
-			set:         &IPSet{Name: "TestAddDelHashIP", SetType: HashIP},
-			entry:       &Entry{IP: "192.168.0.1"},
-			expectFirst: "192.168.0.1",
+			set:            &IPSet{Name: "TestAddDelHashIP", SetType: HashIP},
+			entry:          &Entry{IP: "192.168.0.1"},
+			expectEntryStr: []string{"192.168.0.1"},
+			expectEntries:  []Entry{{IP: "192.168.0.1"}},
 		},
 		{
-			set:         &IPSet{Name: "TestAddDelHashMac", SetType: HashMac},
-			entry:       &Entry{Mac: mac},
-			expectFirst: "01:23:45:67:89:AB",
+			set:            &IPSet{Name: "TestAddDelHashMac", SetType: HashMac},
+			entry:          &Entry{Mac: mac},
+			expectEntryStr: []string{"01:23:45:67:89:AB"},
+			expectEntries:  []Entry{{Mac: mac}},
 		},
 		{
-			set:         &IPSet{Name: "TestAddDelHashIPMac", SetType: HashIPMac},
-			entry:       &Entry{IP: "192.168.0.1", Mac: mac},
-			expectFirst: "192.168.0.1,01:23:45:67:89:AB",
+			set:            &IPSet{Name: "TestAddDelHashIPMac", SetType: HashIPMac},
+			entry:          &Entry{IP: "192.168.0.1", Mac: mac},
+			expectEntryStr: []string{"192.168.0.1,01:23:45:67:89:AB"},
+			expectEntries:  []Entry{{IP: "192.168.0.1", Mac: mac}},
 		},
 		{
-			set:         &IPSet{Name: "TestAddDelHashNet", SetType: HashNet},
-			entry:       &Entry{IP: "192.168.0.1", CIDR: &cidr24},
-			expectFirst: "192.168.0.0/24",
+			set:            &IPSet{Name: "TestAddDelHashNet", SetType: HashNet},
+			entry:          &Entry{IP: "192.168.0.1", CIDR: &cidr24},
+			expectEntryStr: []string{"192.168.0.0/24"},
+			expectEntries:  []Entry{{IP: "192.168.0.0", CIDR: &cidr24}},
 		},
 		{
-			set:         &IPSet{Name: "TestAddDelHashNetNet", SetType: HashNetNet},
-			entry:       &Entry{IP: "192.168.0.1", CIDR: &cidr24, IP2: "192.168.0.2", CIDR2: &cidr24},
-			expectFirst: "192.168.0.0/24,192.168.0.0/24",
+			set:            &IPSet{Name: "TestAddDelHashNetNet", SetType: HashNetNet},
+			entry:          &Entry{IP: "192.168.0.1", CIDR: &cidr24, IP2: "192.168.0.2", CIDR2: &cidr24},
+			expectEntryStr: []string{"192.168.0.0/24,192.168.0.0/24"},
+			expectEntries:  []Entry{{IP: "192.168.0.0", CIDR: &cidr24, IP2: "192.168.0.0", CIDR2: &cidr24}},
 		},
 		{
-			set:         &IPSet{Name: "TestAddDelHashIPPort", SetType: HashIPPort},
-			entry:       &Entry{IP: "192.168.0.1", Port: 34},
-			expectFirst: "192.168.0.1,tcp:34",
+			set:            &IPSet{Name: "TestAddDelHashIPPort", SetType: HashIPPort},
+			entry:          &Entry{IP: "192.168.0.1", Port: 34},
+			expectEntryStr: []string{"192.168.0.1,tcp:34"},
+			expectEntries:  []Entry{{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_TCP}},
 		},
 		{
-			set:           &IPSet{Name: "TestAddDelHashIPPort-Range", SetType: HashIPPort},
-			entry:         &Entry{IP: "192.168.0.1", Port: 34, PortTo: 35, Proto: unix.IPPROTO_UDP},
-			expectEntries: []string{"192.168.0.1,udp:35", "192.168.0.1,udp:34"},
+			set:            &IPSet{Name: "TestAddDelHashIPPort-Range", SetType: HashIPPort},
+			entry:          &Entry{IP: "192.168.0.1", Port: 34, PortTo: 35, Proto: unix.IPPROTO_UDP},
+			expectEntryStr: []string{"192.168.0.1,udp:35", "192.168.0.1,udp:34"},
+			expectEntries:  []Entry{{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP}, {IP: "192.168.0.1", Port: 35, Proto: unix.IPPROTO_UDP}},
 		},
 		{
-			set:         &IPSet{Name: "TestAddDelHashNetPort", SetType: HashNetPort},
-			entry:       &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_TCP},
-			expectFirst: "192.168.0.0/24,tcp:34",
+			set:            &IPSet{Name: "TestAddDelHashNetPort", SetType: HashNetPort},
+			entry:          &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_TCP},
+			expectEntryStr: []string{"192.168.0.0/24,tcp:34"},
+			expectEntries:  []Entry{{IP: "192.168.0.0", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_TCP}},
 		},
 		{
-			set:           &IPSet{Name: "TestAddDelHashNetPort", SetType: HashNetPort},
-			entry:         &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP},
-			expectEntries: []string{"192.168.0.0/24,udp:34"},
+			set:            &IPSet{Name: "TestAddDelHashNetPort", SetType: HashNetPort},
+			entry:          &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP},
+			expectEntryStr: []string{"192.168.0.0/24,udp:34"},
+			expectEntries:  []Entry{{IP: "192.168.0.0", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP}},
 		},
 		{
-			set:           &IPSet{Name: "TestAddDelHashIPPortIP", SetType: HashIPPortIP},
-			entry:         &Entry{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.0.2"},
-			expectEntries: []string{"192.168.0.1,udp:34,192.168.0.2"},
+			set:            &IPSet{Name: "TestAddDelHashIPPortIP", SetType: HashIPPortIP},
+			entry:          &Entry{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.0.2"},
+			expectEntryStr: []string{"192.168.0.1,udp:34,192.168.0.2"},
+			expectEntries:  []Entry{{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.0.2"}},
 		},
 		{
-			set:           &IPSet{Name: "TestAddDelHashIPPortNet", SetType: HashIPPortNet},
-			entry:         &Entry{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.2", CIDR2: &cidr24},
-			expectEntries: []string{"192.168.0.1,udp:34,192.168.1.0/24"},
+			set:            &IPSet{Name: "TestAddDelHashIPPortNet", SetType: HashIPPortNet},
+			entry:          &Entry{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.2", CIDR2: &cidr24},
+			expectEntryStr: []string{"192.168.0.1,udp:34,192.168.1.0/24"},
+			expectEntries:  []Entry{{IP: "192.168.0.1", Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.0", CIDR2: &cidr24}},
 		},
 		{
-			set:           &IPSet{Name: "TestAddDelHashNetPortNet", SetType: HashNetPortNet},
-			entry:         &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.2", CIDR2: &cidr24},
-			expectEntries: []string{"192.168.0.0/24,udp:34,192.168.1.0/24"},
+			set:            &IPSet{Name: "TestAddDelHashNetPortNet", SetType: HashNetPortNet},
+			entry:          &Entry{IP: "192.168.0.1", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.2", CIDR2: &cidr24},
+			expectEntryStr: []string{"192.168.0.0/24,udp:34,192.168.1.0/24"},
+			expectEntries:  []Entry{{IP: "192.168.0.0", CIDR: &cidr24, Port: 34, Proto: unix.IPPROTO_UDP, IP2: "192.168.1.0", CIDR2: &cidr24}},
 		},
 	} {
 		if err := h.Create(test.set); err != nil {
-			errno := *TryConvertErrno(err)
-			if errno != IPSET_ERR_PROTOCOL && errno != IPSET_ERR_FIND_TYPE {
-				t.Errorf("create setType %s failed: %v", string(test.set.SetType), err)
+			errno := TryConvertErrno(err)
+			if errno == nil {
+				t.Error(err)
 			} else {
-				// skip some settypes which may not be supported
-				t.Logf("skip creating setType %s: %v", string(test.set.SetType), err)
-				continue
+				if *errno != IPSET_ERR_PROTOCOL && *errno != IPSET_ERR_FIND_TYPE {
+					t.Errorf("create setType %s failed: %v", string(test.set.SetType), err)
+				} else {
+					// skip some settypes which may not be supported
+					t.Logf("skip creating setType %s: %v", string(test.set.SetType), err)
+					continue
+				}
 			}
 		}
 		if err := h.Add(test.set, test.entry); err != nil {
 			t.Errorf("case %s add: %v", test.set.Name, err)
 		}
-		if test.expectEntries != nil {
-			if entries, err := listMembers(test.set.Name); err != nil {
-				t.Errorf("case %s check: %v", test.set.Name, err)
-			} else {
-				sort.Strings(entries)
-				sort.Strings(test.expectEntries)
-				if fmt.Sprintf("%v", entries) != fmt.Sprintf("%v", test.expectEntries) {
-					t.Errorf("case %s checkEntries: expect %q, real %q", test.set.Name, test.expectEntries, entries)
-				}
-			}
+		if entries, err := listMembers(test.set.Name); err != nil {
+			t.Errorf("case %s check: %v", test.set.Name, err)
 		} else {
-			if err := checkFirstMember(test.set.Name, test.expectFirst); err != nil {
-				t.Fatalf("case %s checkFirstMember: %v", test.set.Name, err)
+			sort.Strings(entries)
+			sort.Strings(test.expectEntryStr)
+			if fmt.Sprintf("%v", entries) != fmt.Sprintf("%v", test.expectEntryStr) {
+				t.Errorf("case %s checkEntries: expect %q, real %q", test.set.Name, test.expectEntryStr, entries)
 			}
+		}
+		if err := checkListEntries(h, test); err != nil {
+			t.Errorf("case %s list: %v", test.set.Name, err)
 		}
 		if err := h.Del(test.set, test.entry); err != nil {
 			t.Errorf("case %s del: %v", test.set.Name, err)
