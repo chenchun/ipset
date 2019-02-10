@@ -10,14 +10,12 @@ import (
 	"testing"
 
 	"encoding/json"
+	"github.com/chenchun/ipset/log"
 	"golang.org/x/sys/unix"
 )
 
 func TestProtocol(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := &Handle{l: &log.Log{}}
 	if proto, err := h.Protocol(); err != nil {
 		t.Fatal(err)
 	} else if proto < IPSET_PROTOCOL_MIN || proto > IPSET_PROTOCOL {
@@ -47,10 +45,7 @@ func allSetType() []SetType {
 }
 
 func TestCreateDestroy(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := &Handle{l: &log.Log{}}
 	if err := h.Create(&IPSet{Name: "TestCreate-inet", SetType: HashIP, Family: "inet"}); err != nil {
 		t.Error(err)
 	}
@@ -95,10 +90,7 @@ func TestTryConvertErrno(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := &Handle{l: &log.Log{}}
 	testSet := &IPSet{Name: "TestList", SetType: HashIP}
 	if err := h.Create(testSet); err != nil {
 		t.Fatal(err)
@@ -162,10 +154,7 @@ func TestList(t *testing.T) {
 }
 
 func TestAddDelHashIP(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := &Handle{l: &log.Log{}}
 	set := &IPSet{Name: "TestAddDelHashIP", SetType: HashIP}
 	if err := h.Create(set); err != nil {
 		t.Error(err)
@@ -294,10 +283,7 @@ type addDelCase struct {
 }
 
 func TestAddDelList(t *testing.T) {
-	h, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := &Handle{l: &log.Log{}}
 	mac, err := net.ParseMAC("01:23:45:67:89:ab")
 	if err != nil {
 		t.Fatal(err)

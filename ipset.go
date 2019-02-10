@@ -12,10 +12,11 @@ import (
 
 // Handle provides a specific ipset handle to program ipset rules.
 type Handle struct {
+	l log.LOG
 }
 
-func New() (*Handle, error) {
-	return &Handle{}, nil
+func New(l log.LOG) (*Handle, error) {
+	return &Handle{l: l}, nil
 }
 
 func (h *Handle) Create(set *IPSet, opts ...Opt) error {
@@ -39,7 +40,7 @@ func (h *Handle) Create(set *IPSet, opts ...Opt) error {
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_TYPENAME, nl.ZeroTerminated(string(set.SetType))))
 	fillRevision(req, set.SetType, set.SetRevison)
 	fillFamily(req, set.Family)
-	log.Debugf("create %v", req.Serialize())
+	h.l.Debugf("create %v", req.Serialize())
 	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
 	return err
 }
@@ -111,7 +112,7 @@ func (h *Handle) Protocol() (uint8, error) {
 		}
 		break
 	}
-	log.Debugf("supported protocol %d, min supported %d", max, min)
+	h.l.Debugf("supported protocol %d, min supported %d", max, min)
 	return max, nil
 }
 
@@ -147,7 +148,7 @@ func (h *Handle) List(setName string, opts ...Opt) ([]ListItem, error) {
 	}
 	var sets []ListItem
 	for k := range msgs {
-		log.Debugf("receive msgs[%d]=%v", k, msgs[k])
+		h.l.Debugf("receive msgs[%d]=%v", k, msgs[k])
 		var ipset ListItem
 		if len(msgs[k]) < SizeofNFGenMsg {
 			return nil, fmt.Errorf("possible corrupt msg %v", msgs[k])
@@ -269,8 +270,7 @@ func parseAdtAttr(data []byte) ([]Entry, error) {
 					}
 					entry.Proto = uint8(nestGrandAttrs[k].Value[0])
 				default:
-					//TODO parse more attrs
-					log.Infof("unknown attr %v", nestGrandAttrs[k].Attr.Type)
+					return nil, fmt.Errorf("unknown attr %v", nestGrandAttrs[k].Attr.Type)
 				}
 			}
 			entries = append(entries, entry)
@@ -321,7 +321,7 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 		return err
 	}
 	req.AddData(dataAttr)
-	log.Debugf("addOrDel %v", req.Serialize())
+	h.l.Debugf("addOrDel %v", req.Serialize())
 	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
 	return err
 }
