@@ -11,7 +11,7 @@ type LOG interface {
 	Fatalf(format string, args ...interface{})
 }
 
-type Log struct {}
+type Log struct{}
 
 // Debugf logs if env DEBUG exist
 func (*Log) Debugf(format string, args ...interface{}) {

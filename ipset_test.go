@@ -217,10 +217,10 @@ func checkListEntries(h *Handle, test addDelCase) error {
 		return err
 	}
 	if len(iterms) != 1 {
-		return fmt.Errorf("zero iterms", test.set.Name)
+		return fmt.Errorf("zero iterms %s", test.set.Name)
 	} else {
 		if len(iterms[0].Entries) != len(test.expectEntries) {
-			return fmt.Errorf("expect %s, real %+v", test.expectEntries, iterms[0].Entries)
+			return fmt.Errorf("expect %+v, real %+v", test.expectEntries, iterms[0].Entries)
 		}
 		sort.Sort(by(test.expectEntries))
 		expectJson, err := json.Marshal(test.expectEntries)

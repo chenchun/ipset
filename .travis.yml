@@ -1,0 +1,11 @@
+sudo: required
+
+language: go
+
+before_install:
+  - uname -a
+  - sudo apt-get -qq update
+  - sudo apt-get install -y ipset
+
+script:
+- sudo -E make test
