@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"github.com/chenchun/ipset/log"
 	"golang.org/x/sys/unix"
+	"os"
 )
 
 func TestProtocol(t *testing.T) {
@@ -178,9 +179,10 @@ func TestAddDelHashIP(t *testing.T) {
 }
 
 func listMembers(set string) ([]string, error) {
+	fmt.Printf("Path env: %s\n", os.Getenv("PATH"))
 	data, err := exec.Command("ipset", "list", set).CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("err: %v output: %v", err, string(data))
 	}
 	var entries []string
 	var members bool
