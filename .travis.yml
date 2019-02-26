@@ -1,11 +1,17 @@
 sudo: required
 
+dist: xenial # Ubuntu Xenial 16.04
+
 language: go
 
 before_install:
   - uname -a
   - sudo apt-get -qq update
   - sudo apt-get install -y ipset
+  - which ipset
+  - echo PATH $PATH
+  - go get -u github.com/Masterminds/glide
+  - glide up --strip-vendor
 
 script:
-- sudo -E make test
+- sudo -E env "PATH=$PATH" make test

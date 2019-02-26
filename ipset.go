@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 
 	"github.com/chenchun/ipset/log"
 	"github.com/vishvananda/netlink/nl"
@@ -12,11 +13,20 @@ import (
 
 // Handle provides a specific ipset handle to program ipset rules.
 type Handle struct {
-	l log.LOG
+	l              log.LOG
+	protolcol      uint8
+	revisionLock   sync.RWMutex
+	setRevisionMap map[SetType][]uint8 // check ipset/lib/ipset_hash_ip.c ...
 }
 
 func New(l log.LOG) (*Handle, error) {
-	return &Handle{l: l}, nil
+	h := &Handle{l: l, setRevisionMap: map[SetType][]uint8{}}
+	if proto, err := h.protocol(); err != nil {
+		return nil, fmt.Errorf("failed to get kernel supported ipset protocol version: %v", err)
+	} else {
+		h.protolcol = proto
+	}
+	return h, nil
 }
 
 func (h *Handle) Create(set *IPSet, opts ...Opt) error {
@@ -32,13 +42,15 @@ func (h *Handle) Create(set *IPSet, opts ...Opt) error {
 			set.Family = "inet"
 		}
 	}
-	req, err := newRequest(IPSET_CMD_CREATE)
+	req, err := h.newRequest(IPSET_CMD_CREATE)
 	if err != nil {
 		return err
 	}
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_SETNAME, nl.ZeroTerminated(set.Name)))
 	req.AddData(nl.NewRtAttr(IPSET_ATTR_TYPENAME, nl.ZeroTerminated(string(set.SetType))))
-	fillRevision(req, set.SetType, set.SetRevison)
+	if err := h.fillRevision(req, set.SetType, set.SetRevison); err != nil {
+		return err
+	}
 	fillFamily(req, set.Family)
 	h.l.Debugf("create %v", req.Serialize())
 	_, err = req.Execute(unix.NETLINK_NETFILTER, 0)
@@ -49,7 +61,7 @@ func (h *Handle) Destroy(setName string, opts ...Opt) error {
 	if setName == "" {
 		return fmt.Errorf("invalid destroy command: missing setname")
 	}
-	req, err := newRequest(IPSET_CMD_DESTROY)
+	req, err := h.newRequest(IPSET_CMD_DESTROY)
 	if err != nil {
 		return err
 	}
@@ -58,12 +70,32 @@ func (h *Handle) Destroy(setName string, opts ...Opt) error {
 	return err
 }
 
-func fillRevision(req *nl.NetlinkRequest, setType SetType, revision *uint8) {
+func (h *Handle) fillRevision(req *nl.NetlinkRequest, setType SetType, revision *uint8) error {
+	var revisions []uint8
+	h.revisionLock.RLock()
+	cached, ok := h.setRevisionMap[setType]
+	h.revisionLock.RUnlock()
+	if ok {
+		revisions = cached
+	} else {
+		max, min, err := h.getRevision(setType)
+		if err != nil {
+			return err
+		}
+		revisions = []uint8{min, max}
+		h.revisionLock.Lock()
+		h.setRevisionMap[setType] = revisions
+		h.revisionLock.Unlock()
+	}
 	if revision != nil {
+		if *revision < revisions[0] {
+			return fmt.Errorf("revision %d is smaller than min supported %d", *revision, revisions[0])
+		}
 		req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(uint8(*revision))))
 	} else {
-		req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(setRevisionMap[setType])))
+		req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(uint8(revisions[1]))))
 	}
+	return nil
 }
 
 func fillFamily(req *nl.NetlinkRequest, hashFamily string) {
@@ -77,8 +109,22 @@ func fillFamily(req *nl.NetlinkRequest, hashFamily string) {
 	}
 }
 
-func (h *Handle) Protocol() (uint8, error) {
-	req, err := newRequest(IPSET_CMD_PROTOCOL)
+//buffers: 28 0 0 0 1 6 1 0 124 248 115 92 0 0 0 0 2 0 0 0 5 0 1 0 7 0 0 0
+//Message header: sent cmd  PROTOCOL (1)
+//len 28
+//flag EXIST
+//seq 1551104124
+//Command attributes:
+//PROTOCOL: 7
+//buffers: 28 0 0 0 1 6 0 0 124 248 115 92 57 10 0 0 2 0 0 0 5 0 1 0 6 0 0 0
+//Message header: received cmd  PROTOCOL (1)
+//len 28
+//flag EXIST
+//seq 1551104124
+//Command attributes:
+//PROTOCOL: 6
+func (h *Handle) protocol() (uint8, error) {
+	req, err := h.newRequest(IPSET_CMD_PROTOCOL)
 	if err != nil {
 		return 0, err
 	}
@@ -134,7 +180,7 @@ func (h *Handle) List(setName string, opts ...Opt) ([]ListItem, error) {
 	//			IPSET_ATTR_DATA
 	//				adt-specific-data
 	//		...
-	req, err := newRequest(IPSET_CMD_LIST)
+	req, err := h.newRequest(IPSET_CMD_LIST)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +357,7 @@ func (h *Handle) addOrDel(command int, set *IPSet, entry *Entry, opts ...Opt) er
 	if set.Name == "" {
 		return fmt.Errorf("invalid add command: missing setname")
 	}
-	req, err := newRequest(command)
+	req, err := h.newRequest(command)
 	if err != nil {
 		return err
 	}
@@ -416,13 +462,13 @@ func fillMac(parent *nl.RtAttr, entry *Entry) error {
 	return nil
 }
 
-func newRequest(cmd int) (*nl.NetlinkRequest, error) {
+func (h *Handle) newRequest(cmd int) (*nl.NetlinkRequest, error) {
 	if cmd <= IPSET_CMD_NONE || cmd >= IPSET_MSG_MAX {
 		return nil, fmt.Errorf("cmd should between IPSET_CMD_NONE and IPSET_MSG_MAX")
 	}
 	req := nl.NewNetlinkRequest(cmd|(NFNL_SUBSYS_IPSET<<8), IPSetCmdflags[cmd-1])
 	req.AddData(&nfgenmsg{family: unix.AF_INET, version: NFNETLINK_V0, resid: 0})
-	req.AddData(nl.NewRtAttr(IPSET_ATTR_PROTOCOL, nl.Uint8Attr(uint8(IPSET_PROTOCOL_MIN))))
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_PROTOCOL, nl.Uint8Attr(h.protolcol)))
 	return req, nil
 }
 
@@ -441,4 +487,64 @@ func TryConvertErrno(err error) *int32 {
 		return &ipsetNo
 	}
 	return nil
+}
+
+//buffers: 48 0 0 0 13 6 1 0 125 248 115 92 0 0 0 0 2 0 0 0 5 0 1 0 6 0 0 0 12 0 3 0 104 97 115 104 58 105 112 0 5 0 5 0 2 0 0 0
+//Message header: sent cmd  TYPE (13)
+//len 48
+//flag EXIST
+//seq 1551104125
+//Command attributes:
+//PROTOCOL: 6
+//TYPENAME: hash:ip
+//FAMILY: 2
+//buffers: 64 0 0 0 13 6 0 0 125 248 115 92 57 10 0 0 2 0 0 0 5 0 1 0 6 0 0 0 12 0 3 0 104 97 115 104 58 105 112 0 5 0 5 0 2 0 0 0 5 0 4 0 4 0 0 0 5 0 10 0 0 0 0 0
+//Message header: received cmd  TYPE (13)
+//len 64
+//flag EXIST
+//seq 1551104125
+//Command attributes:
+//PROTOCOL: 6
+//TYPENAME: hash:ip
+//REVISION: 4
+//FAMILY: 2
+//PROTO_MIN: 0
+func (h *Handle) getRevision(setType SetType) (uint8, uint8, error) {
+	req, err := h.newRequest(IPSET_CMD_TYPE)
+	if err != nil {
+		return 0, 0, err
+	}
+	h.l.Debugf("type %v", req.Serialize())
+	req.AddData(nl.NewRtAttr(IPSET_ATTR_TYPENAME, nl.ZeroTerminated(string(setType))))
+	fillFamily(req, "inet")
+	msgs, err := req.Execute(unix.NETLINK_NETFILTER, 0)
+	if err != nil {
+		return 0, 0, err
+	}
+	var min, max uint8
+	for k := range msgs {
+		h.l.Debugf("receive msgs[%d]=%v", k, msgs[k])
+		if len(msgs[k]) < SizeofNFGenMsg {
+			return 0, 0, fmt.Errorf("possible corrupt msg %v", msgs[k])
+		}
+		//nlGenlMsg := DeserializeNFGenlMsg(msgs[i])
+		attrs, err := nl.ParseRouteAttr(msgs[k][SizeofNFGenMsg:])
+		if err != nil {
+			return 0, 0, fmt.Errorf("possible corrupt msg %v", msgs[k])
+		}
+		for i := range attrs {
+			switch attrs[i].Attr.Type {
+			case IPSET_ATTR_REVISION:
+				if attrs[i].Attr.Len != unix.SizeofRtAttr+1 {
+					return 0, 0, fmt.Errorf("possible corrupt msg %v", msgs[i])
+				}
+				max = uint8(attrs[i].Value[0])
+			case IPSET_ATTR_REVISION_MIN:
+				min = uint8(attrs[i].Value[0])
+			}
+		}
+		break
+	}
+	h.l.Debugf("supported revision of %v is %d, min supported %d", setType, max, min)
+	return max, min, nil
 }

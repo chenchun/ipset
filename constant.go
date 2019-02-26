@@ -332,28 +332,6 @@ const (
 	ListSet        SetType = "list:set"
 )
 
-// check ipset/lib/ipset_hash_ip.c ...
-var (
-	setRevisionMap = map[SetType]uint8{
-		BitmapIP:       3,
-		BitmapIPMac:    3,
-		BitmapPort:     3,
-		HashIP:         4,
-		HashMac:        0,
-		HashIPMac:      0,
-		HashNet:        6,
-		HashNetNet:     2,
-		HashIPPort:     5,
-		HashNetPort:    7,
-		HashIPPortIP:   5,
-		HashIPPortNet:  7,
-		HashIPMark:     2,
-		HashNetPortNet: 2,
-		HashNetIface:   6,
-		ListSet:        3,
-	}
-)
-
 // struct nfgenmsg {
 // 	uint8_t nfgen_family;
 // 	uint8_t version;

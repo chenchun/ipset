@@ -15,8 +15,11 @@ import (
 )
 
 func TestProtocol(t *testing.T) {
-	h := &Handle{l: &log.Log{}}
-	if proto, err := h.Protocol(); err != nil {
+	h, err := New(&log.Log{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proto, err := h.protocol(); err != nil {
 		t.Fatal(err)
 	} else if proto < IPSET_PROTOCOL_MIN || proto > IPSET_PROTOCOL {
 		t.Fatal(err)
@@ -45,7 +48,10 @@ func allSetType() []SetType {
 }
 
 func TestCreateDestroy(t *testing.T) {
-	h := &Handle{l: &log.Log{}}
+	h, err := New(&log.Log{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := h.Create(&IPSet{Name: "TestCreate-inet", SetType: HashIP, Family: "inet"}); err != nil {
 		t.Error(err)
 	}
@@ -90,7 +96,10 @@ func TestTryConvertErrno(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	h := &Handle{l: &log.Log{}}
+	h, err := New(&log.Log{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	testSet := &IPSet{Name: "TestList", SetType: HashIP}
 	if err := h.Create(testSet); err != nil {
 		t.Fatal(err)
@@ -154,7 +163,10 @@ func TestList(t *testing.T) {
 }
 
 func TestAddDelHashIP(t *testing.T) {
-	h := &Handle{l: &log.Log{}}
+	h, err := New(&log.Log{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	set := &IPSet{Name: "TestAddDelHashIP", SetType: HashIP}
 	if err := h.Create(set); err != nil {
 		t.Error(err)
@@ -180,7 +192,7 @@ func TestAddDelHashIP(t *testing.T) {
 func listMembers(set string) ([]string, error) {
 	data, err := exec.Command("ipset", "list", set).CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("err: %v output: %v", err, string(data))
 	}
 	var entries []string
 	var members bool
@@ -283,7 +295,10 @@ type addDelCase struct {
 }
 
 func TestAddDelList(t *testing.T) {
-	h := &Handle{l: &log.Log{}}
+	h, err := New(&log.Log{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	mac, err := net.ParseMAC("01:23:45:67:89:ab")
 	if err != nil {
 		t.Fatal(err)
@@ -366,7 +381,7 @@ func TestAddDelList(t *testing.T) {
 		if err := h.Create(test.set); err != nil {
 			errno := TryConvertErrno(err)
 			if errno == nil {
-				t.Error(err)
+				t.Fatal(err)
 			} else {
 				if *errno != IPSET_ERR_PROTOCOL && *errno != IPSET_ERR_FIND_TYPE {
 					t.Errorf("create setType %s failed: %v", string(test.set.SetType), err)
@@ -381,7 +396,11 @@ func TestAddDelList(t *testing.T) {
 			t.Errorf("case %s add: %v", test.set.Name, err)
 		}
 		if entries, err := listMembers(test.set.Name); err != nil {
-			t.Errorf("case %s check: %v", test.set.Name, err)
+			if strings.Contains(err.Error(), "Kernel and userspace incompatible") {
+				t.Logf("listing using ipset command got: %v, skiping", err)
+			} else {
+				t.Errorf("case %s check: %v", test.set.Name, err)
+			}
 		} else {
 			sort.Strings(entries)
 			sort.Strings(test.expectEntryStr)
@@ -398,5 +417,22 @@ func TestAddDelList(t *testing.T) {
 		if err := h.Destroy(test.set.Name); err != nil {
 			t.Errorf("case %s destroy: %v", test.set.Name, err)
 		}
+	}
+}
+
+func TestGetRevision(t *testing.T) {
+	h, err := New(&log.Log{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	max, min, err := h.getRevision(HashIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if max == 0 {
+		t.Fatal(max)
+	}
+	if min != 0 {
+		t.Log(min)
 	}
 }
