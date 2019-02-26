@@ -91,6 +91,9 @@ func (h *Handle) fillRevision(req *nl.NetlinkRequest, setType SetType, revision 
 		if *revision < revisions[0] {
 			return fmt.Errorf("revision %d is smaller than min supported %d", *revision, revisions[0])
 		}
+		if *revision > revisions[1] {
+			return fmt.Errorf("revision %d is larger than max supported %d", *revision, revisions[1])
+		}
 		req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(uint8(*revision))))
 	} else {
 		req.AddData(nl.NewRtAttr(IPSET_ATTR_REVISION, nl.Uint8Attr(uint8(revisions[1]))))
