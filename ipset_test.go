@@ -397,7 +397,8 @@ func TestAddDelList(t *testing.T) {
 		}
 		if entries, err := listMembers(test.set.Name); err != nil {
 			if strings.Contains(err.Error(), "Kernel and userspace incompatible") {
-				t.Logf("listing using ipset command got: %v, skiping", err)
+				t.Logf("case %s listing using ipset command got: %v, skiping", test.set.Name, err)
+				continue
 			} else {
 				t.Errorf("case %s check: %v", test.set.Name, err)
 			}

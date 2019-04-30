@@ -11,16 +11,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var (
+	revisionLock   sync.RWMutex
+	setRevisionMap = map[SetType][]uint8{} // check ipset/lib/ipset_hash_ip.c ...
+)
+
 // Handle provides a specific ipset handle to program ipset rules.
 type Handle struct {
-	l              log.LOG
-	protolcol      uint8
-	revisionLock   sync.RWMutex
-	setRevisionMap map[SetType][]uint8 // check ipset/lib/ipset_hash_ip.c ...
+	l         log.LOG
+	protolcol uint8
 }
 
 func New(l log.LOG) (*Handle, error) {
-	h := &Handle{l: l, setRevisionMap: map[SetType][]uint8{}}
+	h := &Handle{l: l}
 	if proto, err := h.protocol(); err != nil {
 		return nil, fmt.Errorf("failed to get kernel supported ipset protocol version: %v", err)
 	} else {
@@ -72,9 +75,9 @@ func (h *Handle) Destroy(setName string, opts ...Opt) error {
 
 func (h *Handle) fillRevision(req *nl.NetlinkRequest, setType SetType, revision *uint8) error {
 	var revisions []uint8
-	h.revisionLock.RLock()
-	cached, ok := h.setRevisionMap[setType]
-	h.revisionLock.RUnlock()
+	revisionLock.RLock()
+	cached, ok := setRevisionMap[setType]
+	revisionLock.RUnlock()
 	if ok {
 		revisions = cached
 	} else {
@@ -83,9 +86,9 @@ func (h *Handle) fillRevision(req *nl.NetlinkRequest, setType SetType, revision 
 			return err
 		}
 		revisions = []uint8{min, max}
-		h.revisionLock.Lock()
-		h.setRevisionMap[setType] = revisions
-		h.revisionLock.Unlock()
+		revisionLock.Lock()
+		setRevisionMap[setType] = revisions
+		revisionLock.Unlock()
 	}
 	if revision != nil {
 		if *revision < revisions[0] {
