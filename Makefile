@@ -3,4 +3,4 @@ all:
 clean:
 	rm -f const.go
 test:
-	go test -v .
+	GO111MODULE=on go test -v .

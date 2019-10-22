@@ -1,6 +1,0 @@
-package: github.com/chenchun/ipset
-import:
-- package: github.com/vishvananda/netlink
-  version: 25298936a61ab979b733cf02358ffff22f57b23a
-  subpackages:
-  - nl
