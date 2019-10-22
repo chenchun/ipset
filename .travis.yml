@@ -14,3 +14,6 @@ before_install:
 
 script:
 - sudo -E env "PATH=$PATH" make test
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
