@@ -2,5 +2,5 @@ github.com/vishvananda/netlink v0.0.0-20181130164118-25298936a61a h1:X33lb8Oit7i
 github.com/vishvananda/netlink v0.0.0-20181130164118-25298936a61a/go.mod h1:+SR5DhBJrl6ZM7CoCKvpw5BKroDKQ+PJqOg65H/2ktk=
 github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc h1:R83G5ikgLMxrBvLh22JhdfI8K6YXEPHx5P03Uu3DRs4=
 github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc/go.mod h1:ZjcWmFBXmLKZu9Nxj3WKYEafiSqer2rnvPr0en9UNpI=
-golang.org/x/sys v0.0.0-20160601133225-076b54675315 h1:QRqWoRaMECxessIuXmVVXWNmh95Vby+g1KADI3ZJuh8=
-golang.org/x/sys v0.0.0-20160601133225-076b54675315/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+golang.org/x/sys v0.1.0 h1:kunALQeHf1/185U1i0GOB/fy1IPRDDpuoOOqRReG57U=
+golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
